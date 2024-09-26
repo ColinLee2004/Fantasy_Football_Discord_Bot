@@ -112,7 +112,7 @@ client.on(Events.MessageCreate, async (message) => {
     if (command == 'logstats') {
     }
     let prompt =
-        'return a JSON object containing player name, opponent, projected score, and actual score.';
+        'Return a JSON object containing player name, opponent, projected score, and actual score. Do not include ```json or ```';
 
     if (message.author.bot) {
         return;
@@ -137,17 +137,18 @@ client.on(Events.MessageCreate, async (message) => {
     }
 
     const completion = await openaiClient.chat.completions.create({
-        model: 'gpt-4o',
+        model: 'gpt-4o-mini',
         messages: [
             {
                 role: 'user',
                 content: promptArray,
-                response_format: zodResponseFormat(team, 'logstats_response'),
             },
         ],
+        max_tokens: 300,
+        response_format: zodResponseFormat(team, 'logstats_response'),
     });
     //message.reply(completion.choices[0].message.content);
-    //console.log(completion.choices[0].message.content);
+    console.log(completion.choices[0].message.content);
     sheets = await getAuth();
     res2 = await getNames(sheets);
     console.log(res2);
