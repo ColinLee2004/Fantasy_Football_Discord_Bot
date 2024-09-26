@@ -2,7 +2,7 @@
 const { Client, Events, GatewayIntentBits } = require('discord.js');
 require('dotenv').config();
 const OpenAI = require('openai');
-const { z } = require('zod');
+const { z, intersection } = require('zod');
 const { zodResponseFormat } = require('openai/helpers/zod');
 const prefix = '.';
 
@@ -66,9 +66,11 @@ async function getNames(sheets) {
     return result.data.values;
 }
 
-async function testWrite(sheets, values) {
+async function write_to_sheet(sheets, values, week) {
     const spreadsheetId = ss_ID;
-    const range = 'Stats!A1';
+    let idx = 5 + 4 * week;
+    let idx_str = idx.toString();
+    const range = "'Stats'!R3:C" + idx_str;
     const valueInputOption = 'USER_ENTERED';
 
     const resource = { values };
@@ -91,21 +93,32 @@ async function testWrite(sheets, values) {
 async function readSheet(sheets, week) {
     const metaData = await sheets.spreadsheets.values.get({
         spreadsheetId: ss_ID,
-        range: "'Stats'!C3:G3",
+        range: "'Stats'!C3:3",
     });
 
     console.log(metaData.data.values[0].indexOf(week));
+    return metaData.data.values[0].indexOf(week);
 }
 
-// When the client is ready, run this code (only once).
-// The distinction between `client: Client<boolean>` and `readyClient: Client<true>` is important for TypeScript developers.
-// It makes some properties non-nullable.
-client.once(Events.ClientReady, (readyClient) => {
-    console.log(`Ready! Logged in as ${readyClient.user.tag}`);
-});
+async function order_players(j_object, players_list) {
+    const orderedPlayers = players_list.map((playerNameArray) => {
+        const playerName = playerNameArray[0];
+        const player = j_object.players.find(
+            (player) => player.name === playerName
+        );
 
-client.on(Events.MessageCreate, async (message) => {
-    //if (!message.content.startsWith(prefix)) return;
+        // If player exists, return the player object, else return a default object with empty fields
+        return player || { name: playerName, opp: '', proj: '', score: '' };
+    });
+
+    const playersValuesList = orderedPlayers.map((player) =>
+        Object.values(player)
+    );
+
+    return playersValuesList;
+}
+
+async function get_json(message) {
     let args = message.content.slice(prefix.length).split(' ');
     let command = args.shift().toLowerCase();
 
@@ -144,15 +157,45 @@ client.on(Events.MessageCreate, async (message) => {
                 content: promptArray,
             },
         ],
-        max_tokens: 300,
+        max_tokens: 350,
         response_format: zodResponseFormat(team, 'logstats_response'),
     });
-    //message.reply(completion.choices[0].message.content);
-    console.log(completion.choices[0].message.content);
+
+    return completion.choices[0].message.content;
+}
+
+async function create_sheet_array(message) {
+    const j_string = await get_json(message);
+    const parsedJsonObject = JSON.parse(j_string);
+
     sheets = await getAuth();
-    res2 = await getNames(sheets);
-    console.log(res2);
-    //readSheet(sheets, '1');
+
+    const players_list = await getNames(sheets);
+
+    const playerValuesList = await order_players(
+        parsedJsonObject,
+        players_list
+    );
+
+    let data = playerValuesList.map((sublist) => sublist.slice(1));
+    data.unshift(['Opponent', 'Proj', 'Score']);
+
+    return data;
+}
+
+// When the client is ready, run this code (only once).
+// The distinction between `client: Client<boolean>` and `readyClient: Client<true>` is important for TypeScript developers.
+// It makes some properties non-nullable.
+client.once(Events.ClientReady, (readyClient) => {
+    console.log(`Ready! Logged in as ${readyClient.user.tag}`);
+});
+
+client.on(Events.MessageCreate, async (message) => {
+    if (!message.content.startsWith(prefix)) return;
+    playerValuesList = await create_sheet_array(message);
+    console.log(playerValuesList);
+    sheets = await getAuth();
+    write_to_sheet(sheets, playerValuesList, week);
 });
 
 // Log in to Discord with your client's token
