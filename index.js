@@ -60,23 +60,24 @@ async function getAuth() {
 async function getNames(sheets) {
     const result = await sheets.spreadsheets.values.get({
         spreadsheetId: ss_ID,
-        range: "'Stats'!C5:C",
+        range: "'Stats'!B2:2",
     });
+    console.log(result.data.values);
 
     return result.data.values;
 }
 
 async function write_to_sheet(sheets, values, week) {
     const spreadsheetId = ss_ID;
-    let idx = 5 + 4 * week;
+    let week8 = parseInt(week);
+    let idx = 4 + 4 * (week8 - 1);
     let idx_str = idx.toString();
-    const range = "'Stats'!R3:C" + idx_str;
+    let range = "'Stats'!B" + idx_str;
+    //const range = "'Stats'!B4"; //N6
     const valueInputOption = 'USER_ENTERED';
-
-    const resource = { values };
+    console.log(`range: ${range}`);
     console.log('here');
-    console.log(sheets);
-
+    const resource = { values };
     try {
         const res = await sheets.spreadsheets.values.update({
             spreadsheetId,
@@ -84,43 +85,20 @@ async function write_to_sheet(sheets, values, week) {
             valueInputOption,
             resource,
         });
-        return; // Returns the response from the Sheets API.
+        return res; // Returns the response from the Sheets API.
     } catch (error) {
         console.error('error', error); // Logs errors.
     }
 }
 
-async function readSheet(sheets, week) {
-    const metaData = await sheets.spreadsheets.values.get({
-        spreadsheetId: ss_ID,
-        range: "'Stats'!C3:3",
-    });
-
-    console.log(metaData.data.values[0].indexOf(week));
-    return metaData.data.values[0].indexOf(week);
-}
-
-async function order_players(j_object, players_list) {
-    const orderedPlayers = players_list.map((playerNameArray) => {
-        const playerName = playerNameArray[0];
-        const player = j_object.players.find(
-            (player) => player.name === playerName
-        );
-
-        // If player exists, return the player object, else return a default object with empty fields
-        return player || { name: playerName, opp: '', proj: '', score: '' };
-    });
-
-    const playersValuesList = orderedPlayers.map((player) =>
-        Object.values(player)
-    );
-
-    return playersValuesList;
-}
-
 async function get_json(message) {
+    console.log(message);
     let args = message.content.slice(prefix.length).split(' ');
+    console.log(args);
     let command = args.shift().toLowerCase();
+    const week1 = args[args.length - 1];
+    console.log(typeof week1);
+    console.log(week1);
 
     if (command == 'logstats') {
     }
@@ -157,32 +135,42 @@ async function get_json(message) {
                 content: promptArray,
             },
         ],
-        max_tokens: 350,
+        max_tokens: 450,
         response_format: zodResponseFormat(team, 'logstats_response'),
     });
-
-    return completion.choices[0].message.content;
+    //console.log(completion.choices[0].message.content);
+    return [completion.choices[0].message.content, week1];
 }
 
-async function create_sheet_array(message) {
-    const j_string = await get_json(message);
-    const parsedJsonObject = JSON.parse(j_string);
+async function create_sheet_array(sheets, json_object) {
+    const names = await getNames(sheets);
+    const opponents = [];
+    const projections = [];
+    const scores = [];
 
-    sheets = await getAuth();
+    // Iterate over the playersList and match against jsonData to fill the arrays
+    names[0].forEach((player) => {
+        const foundPlayer = json_object.players.find((p) => p.name === player);
 
-    const players_list = await getNames(sheets);
+        if (foundPlayer) {
+            opponents.push(foundPlayer.opp);
+            projections.push(foundPlayer.proj);
+            scores.push(foundPlayer.score);
+        } else {
+            // Push null or empty string if the player is not found
+            opponents.push(null);
+            projections.push(null);
+            scores.push(null);
+        }
+    });
 
-    const playerValuesList = await order_players(
-        parsedJsonObject,
-        players_list
-    );
+    const combinedList = [opponents, projections, scores];
 
-    let data = playerValuesList.map((sublist) => sublist.slice(1));
-    data.unshift(['Opponent', 'Proj', 'Score']);
-
-    return data;
+    // Output the combined list
+    console.log('Combined List:', combinedList);
+    return combinedList;
 }
-
+const sample = [[1, 2, 3, 4]];
 // When the client is ready, run this code (only once).
 // The distinction between `client: Client<boolean>` and `readyClient: Client<true>` is important for TypeScript developers.
 // It makes some properties non-nullable.
@@ -192,10 +180,13 @@ client.once(Events.ClientReady, (readyClient) => {
 
 client.on(Events.MessageCreate, async (message) => {
     if (!message.content.startsWith(prefix)) return;
-    playerValuesList = await create_sheet_array(message);
-    console.log(playerValuesList);
     sheets = await getAuth();
-    write_to_sheet(sheets, playerValuesList, week);
+    const j_string_week = await get_json(message);
+    const json_object = JSON.parse(j_string_week[0]);
+    const combinedList = await create_sheet_array(sheets, json_object);
+    console.log(j_string_week);
+    const res = await write_to_sheet(sheets, combinedList, j_string_week[1]);
+    console.log(res);
 });
 
 // Log in to Discord with your client's token
